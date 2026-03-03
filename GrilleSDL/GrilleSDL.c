@@ -584,6 +584,7 @@ void* FctThreadEventSDL(void *p)
         // Croix de fermeture de la fenetre
         pthread_mutex_lock(&(maGrille.mutexW));
         maGrille.event.type = CROIX;
+        puts("Croix"); fflush(stdout);
         pthread_mutex_unlock(&(maGrille.mutexR));
       }
 
