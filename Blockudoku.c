@@ -47,65 +47,107 @@ typedef struct
 } PIECE;
 
 PIECE pieces[12] = { 0,0,0,1,1,0,1,1,4,0,       // carre 4
-                     0,0,1,0,2,0,2,1,4,0,       // L 4
-                     0,1,1,1,2,0,2,1,4,0,       // J 4
-                     0,0,0,1,1,1,1,2,4,0,       // Z 4
-                     0,1,0,2,1,0,1,1,4,0,       // S 4
-                     0,0,0,1,0,2,1,1,4,0,       // T 4
-                     0,0,0,1,0,2,0,3,4,0,       // I 4
-                     0,0,0,1,0,2,0,0,3,0,       // I 3
-                     0,1,1,0,1,1,0,0,3,0,       // J 3
-                     0,0,1,0,1,1,0,0,3,0,       // L 3
-                     0,0,0,1,0,0,0,0,2,0,       // I 2
-                     0,0,0,0,0,0,0,0,1,0 };     // carre 1
+					 0,0,1,0,2,0,2,1,4,0,       // L 4
+					 0,1,1,1,2,0,2,1,4,0,       // J 4
+					 0,0,0,1,1,1,1,2,4,0,       // Z 4
+					 0,1,0,2,1,0,1,1,4,0,       // S 4
+					 0,0,0,1,0,2,1,1,4,0,       // T 4
+					 0,0,0,1,0,2,0,3,4,0,       // I 4
+					 0,0,0,1,0,2,0,0,3,0,       // I 3
+					 0,1,1,0,1,1,0,0,3,0,       // J 3
+					 0,0,1,0,1,1,0,0,3,0,       // L 3
+					 0,0,0,1,0,0,0,0,2,0,       // I 2
+					 0,0,0,0,0,0,0,0,1,0 };     // carre 1
 
 void DessinePiece(PIECE piece);
 int  CompareCases(CASE case1,CASE case2);
 void TriCases(CASE *vecteur,int indiceDebut,int indiceFin);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+///// Personal work ///////////////////////////////////////////////////////////////////////////////
+
+#define TRACE(message) printf("[%d::%lu] : %s\n", getpid(), pthread_self(), message)
+// Global variables
+char* message; // pointeur vers le message à faire défiler
+int tailleMessage; // longueur du message
+int indiceCourant; // indice du premier caractère à afficher dans la zone graphique
+char messageReady = 0;
+
+pthread_mutex_t mutexMessage = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t condMessage;
+
+// Utilities funtions
+void setMessage(const char* texte, char signalOn);
+
+// Thread functions
+void* threadDefileMessage(void* arg);
+
+// Handlers
+void HandlerSIGALRM(int sig);
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc,char* argv[])
 {
-  EVENT_GRILLE_SDL event;
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGALRM);
+    pthread_sigmask(SIG_SETMASK, &mask, NULL);
+
+    struct sigaction setALRM;
+    setALRM.sa_handler = HandlerSIGALRM;
+    setALRM.sa_flags = 0;
+    sigemptyset(&(setALRM.sa_mask));
+    sigaction(SIGALRM, &setALRM, NULL);
+
+
+    EVENT_GRILLE_SDL event;
  
-  srand((unsigned)time(NULL));
+    srand((unsigned)time(NULL));
 
-  // Ouverture de la fenetre graphique
-  printf("(MAIN %lu) Ouverture de la fenetre graphique\n",pthread_self()); fflush(stdout);
-  if (OuvertureFenetreGraphique() < 0)
-  {
-    printf("Erreur de OuvrirGrilleSDL\n");
-    fflush(stdout);
-    exit(1);
-  }
+    // Ouverture de la fenetre graphique
+    TRACE("Ouverture de la fenetre graphique");
 
-  // Exemples d'utilisation du module Ressources --> a supprimer
-  DessineChiffre(1,15,7);
-  char buffer[40];
-  sprintf(buffer,"coucou");
-  for (int i=0 ; i<strlen(buffer) ; i++) DessineLettre(10,2+i,buffer[i]);
-  DessineBrique(7,3,false);
-  DessineBrique(7,5,true);
-
-  printf("(MAIN %lu) Attente du clic sur la croix\n",pthread_self());  
-  bool ok = false;
-  while(!ok)
-  {
-    event = ReadEvent();
-    if (event.type == CROIX) ok = true;
-    if (event.type == CLIC_GAUCHE)
+    if (OuvertureFenetreGraphique() < 0)
     {
-      DessineDiamant(event.ligne,event.colonne,ROUGE);
-      tab[event.ligne][event.colonne] = DIAMANT;
+	    printf("Erreur de OuvrirGrilleSDL\n");
+	    exit(1);
     }
-  }
 
-  // Fermeture de la fenetre
-  printf("(MAIN %lu) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
-  FermetureFenetreGraphique();
-  printf("OK\n");
+    //  // Exemples d'utilisation du module Ressources --> a supprimer
+    //  DessineChiffre(1,15,7);
+    //  char buffer[40];
+    //  sprintf(buffer,"coucou");
+    //  for (int i=0 ; i<strlen(buffer) ; i++) DessineLettre(10,2+i,buffer[i]);
+    //  DessineBrique(7,3,false);
+    //  DessineBrique(7,5,true);
 
-  exit(0);
+    pthread_t thrDefileMsg = 0;
+
+    TRACE("Lancement threadDefileMsg...");
+
+    pthread_create(&thrDefileMsg, NULL, threadDefileMessage, 0);
+    setMessage("Lancement du jeu", true);
+
+
+    printf("(MAIN %lu) Attente du clic sur la croix\n",pthread_self());  
+    char ok = false;
+    while(!ok)
+    {
+        event = ReadEvent();
+        if (event.type == CROIX) ok = true;
+        if (event.type == CLIC_GAUCHE)
+        {
+        DessineDiamant(event.ligne,event.colonne,ROUGE);
+        tab[event.ligne][event.colonne] = DIAMANT;
+        }
+    }
+
+    // Fermeture de la fenetre
+    printf("(MAIN %lu) Fermeture de la fenetre graphique...",pthread_self()); fflush(stdout);
+    FermetureFenetreGraphique();
+    printf("OK\n");
+
+    exit(0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -113,77 +155,146 @@ int main(int argc,char* argv[])
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void DessinePiece(PIECE piece)
 {
-  int Lmin,Lmax,Cmin,Cmax;
-  int largeur,hauteur,Lref,Cref;
+    int Lmin,Lmax,Cmin,Cmax;
+    int largeur,hauteur,Lref,Cref;
 
-  Lmin = piece.cases[0].ligne;
-  Lmax = piece.cases[0].ligne;
-  Cmin = piece.cases[0].colonne;
-  Cmax = piece.cases[0].colonne;
+    Lmin = piece.cases[0].ligne;
+    Lmax = piece.cases[0].ligne;
+    Cmin = piece.cases[0].colonne;
+    Cmax = piece.cases[0].colonne;
 
-  for (int i=1 ; i<=(piece.nbCases-1) ; i++)
-  {
-    if (piece.cases[i].ligne > Lmax) Lmax = piece.cases[i].ligne;
-    if (piece.cases[i].ligne < Lmin) Lmin = piece.cases[i].ligne;
-    if (piece.cases[i].colonne > Cmax) Cmax = piece.cases[i].colonne;
-    if (piece.cases[i].colonne < Cmin) Cmin = piece.cases[i].colonne;
-  }
+    for (int i=1 ; i<=(piece.nbCases-1) ; i++)
+    {
+        if (piece.cases[i].ligne > Lmax) Lmax = piece.cases[i].ligne;
+        if (piece.cases[i].ligne < Lmin) Lmin = piece.cases[i].ligne;
+        if (piece.cases[i].colonne > Cmax) Cmax = piece.cases[i].colonne;
+        if (piece.cases[i].colonne < Cmin) Cmin = piece.cases[i].colonne;
+    }
 
-  largeur = Cmax - Cmin + 1;
-  hauteur = Lmax - Lmin + 1;
+    largeur = Cmax - Cmin + 1;
+    hauteur = Lmax - Lmin + 1;
 
-  switch(largeur)
-  {
-    case 1 : Cref = 15; break;
-    case 2 : Cref = 15; break;
-    case 3 : Cref = 14; break;
-    case 4 : Cref = 14; break;  
-  }
+    switch(largeur)
+    {
+        case 1 : Cref = 15; break;
+        case 2 : Cref = 15; break;
+        case 3 : Cref = 14; break;
+        case 4 : Cref = 14; break;  
+    }
 
-  switch(hauteur)
-  {
-    case 1 : Lref = 4; break;
-    case 2 : Lref = 4; break;
-    case 3 : Lref = 3; break;
-    case 4 : Lref = 3; break;
-  }
+    switch(hauteur)
+    {
+        case 1 : Lref = 4; break;
+        case 2 : Lref = 4; break;
+        case 3 : Lref = 3; break;
+        case 4 : Lref = 3; break;
+    }
 
-  for (int L=3 ; L<=6 ; L++) for (int C=14 ; C<=17 ; C++) EffaceCarre(L,C);
-  for (int i=0 ; i<piece.nbCases ; i++) DessineDiamant(Lref + piece.cases[i].ligne,Cref + piece.cases[i].colonne,piece.couleur);
+    for (int L=3 ; L<=6 ; L++) for (int C=14 ; C<=17 ; C++) EffaceCarre(L,C);
+    for (int i=0 ; i<piece.nbCases ; i++) DessineDiamant(Lref + piece.cases[i].ligne,Cref + piece.cases[i].colonne,piece.couleur);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 int CompareCases(CASE case1,CASE case2)
 {
-  if (case1.ligne < case2.ligne) return -1;
-  if (case1.ligne > case2.ligne) return +1;
-  if (case1.colonne < case2.colonne) return -1;
-  if (case1.colonne > case2.colonne) return +1;
-  return 0;
+    if (case1.ligne < case2.ligne) return -1;
+    if (case1.ligne > case2.ligne) return +1;
+    if (case1.colonne < case2.colonne) return -1;
+    if (case1.colonne > case2.colonne) return +1;
+    return 0;
 }
 
 void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
-{ // trie les cases de vecteur entre les indices indiceDebut et indiceFin compris
-  // selon le critere impose par la fonction CompareCases()
-  // Exemple : pour trier un vecteur v de 4 cases, il faut appeler TriCases(v,0,3); 
-  int  i,iMin;
-  CASE tmp;
+{   // trie les cases de vecteur entre les indices indiceDebut et indiceFin compris
+    // selon le critere impose par la fonction CompareCases()
+    // Exemple : pour trier un vecteur v de 4 cases, il faut appeler TriCases(v,0,3); 
+    int  i,iMin;
+    CASE tmp;
 
-  if (indiceDebut >= indiceFin) return;
+    if (indiceDebut >= indiceFin) return;
 
-  // Recherche du minimum
-  iMin = indiceDebut;
-  for (i=indiceDebut ; i<=indiceFin ; i++)
-    if (CompareCases(vecteur[i],vecteur[iMin]) < 0) iMin = i;
+    // Recherche du minimum
+    iMin = indiceDebut;
+    for (i=indiceDebut ; i<=indiceFin ; i++)
+        if (CompareCases(vecteur[i],vecteur[iMin]) < 0) iMin = i;
 
-  // On place le minimum a l'indiceDebut par permutation
-  tmp = vecteur[indiceDebut];
-  vecteur[indiceDebut] = vecteur[iMin];
-  vecteur[iMin] = tmp;
+    // On place le minimum a l'indiceDebut par permutation
+    tmp = vecteur[indiceDebut];
+    vecteur[indiceDebut] = vecteur[iMin];
+    vecteur[iMin] = tmp;
 
-  // Tri du reste du vecteur par recursivite
-  TriCases(vecteur,indiceDebut+1,indiceFin); 
+    // Tri du reste du vecteur par recursivite
+    TriCases(vecteur,indiceDebut+1,indiceFin); 
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+///// Personal functions //////////////////////////////////////////////////////////////////////////
 
+// Utilities function
+
+void setMessage(const char* texte, char signalOn)
+{
+    alarm(0);
+
+    pthread_mutex_lock(&mutexMessage);
+
+    // printf("%p", message);
+    tailleMessage=strlen(texte);
+    message = (char*) realloc(message , tailleMessage+1);
+    strcpy(message, texte);
+    indiceCourant = 0;
+
+    pthread_cond_signal(&condMessage);
+
+    pthread_mutex_unlock(&mutexMessage);
+    
+    if(signalOn)
+    {
+        alarm(0);
+        alarm(10);
+    }
+}
+
+// Thread functions
+void* threadDefileMessage(void* arg)
+{
+    TRACE("threadDefileMessage lancé");
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    pthread_sigmask(SIG_SETMASK, &mask, NULL);
+
+    TRACE("Mask mit");
+
+    pthread_mutex_lock(&mutexMessage);
+    while(message==NULL)
+        pthread_cond_wait(&condMessage, &mutexMessage);
+    pthread_mutex_unlock(&mutexMessage);
+
+    TRACE("message non nul");
+
+    for(int i = 1; i<=17; i++) DessineLettre(10, i, 0);
+
+    while(true)
+    {
+        pthread_mutex_lock(&mutexMessage);
+        for (int i=0 ; i<tailleMessage; i++) DessineLettre(10,1+i,(i+indiceCourant<tailleMessage? message[i+indiceCourant] : 0));
+        indiceCourant=(indiceCourant+1)%(tailleMessage+1);
+        pthread_mutex_unlock(&mutexMessage);
+
+        struct timespec spec = {0, 400000000};
+
+        nanosleep(&spec, NULL);
+    }
+
+    pthread_exit(NULL);
+}
+
+// Handlers
+
+void HandlerSIGALRM(int sig)
+{
+    pthread_mutex_unlock(&mutexMessage);
+
+    setMessage("Jeu en cours", false);
+}

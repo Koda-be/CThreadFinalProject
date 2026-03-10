@@ -9,11 +9,14 @@
 #define BLEU                      400004
 #define JAUNE                     400005
 
+#define false 0
+#define true 1
+
 int  OuvertureFenetreGraphique();
 int  FermetureFenetreGraphique();
 
 void DessineDiamant(int l,int c,int couleur);
-void DessineBrique(int l,int c,bool fusion);
+void DessineBrique(int l,int c,char fusion);
 void DessineVoyant(int l,int c,int couleur);
 void DessineChiffre(int l,int c,int val);
 void DessineLettre(int L,int C,char c);

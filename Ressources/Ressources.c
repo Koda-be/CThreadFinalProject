@@ -154,7 +154,7 @@ void DessineDiamant(int l,int c,int couleur)
   }
 }
 
-void DessineBrique(int l,int c,bool fusion)
+void DessineBrique(int l,int c,char fusion)
 {
   if (fusion) DessineSprite(l,c,S_BRIQUE_FUSION);
   else DessineSprite(l,c,S_BRIQUE);
