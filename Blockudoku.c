@@ -82,14 +82,20 @@ PIECE pieceEnCours;
 CASE casesInserees[NB_CASES];
 int nbCasesInserees;
 
+// Variables score
+char MAJScore;
+int score;
+
 // Mutex
-pthread_mutex_t mutexTID = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutexMessage = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutexCasesInserees = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutexTID = PTHREAD_MUTEX_INITIALIZER,
+                mutexMessage = PTHREAD_MUTEX_INITIALIZER,
+                mutexCasesInserees = PTHREAD_MUTEX_INITIALIZER,
+                mutexScore = PTHREAD_MUTEX_INITIALIZER;
 
 // Conditions
-pthread_cond_t condMessage;
-pthread_cond_t condCasesInserees;
+pthread_cond_t  condMessage,
+                condCasesInserees,
+                condScore;
 
 // Cles
 pthread_key_t cleID;
@@ -102,9 +108,10 @@ void RotationPiece(PIECE* piece);
 
 
 // Thread functions
-void* threadDefileMessage(void* arg);
-void* threadPiece(void* arg);
-void* threadEvent(void* arg);
+void    *threadDefileMessage(void* arg),
+        *threadPiece(void* arg),
+        *threadEvent(void* arg),
+        *threadScore(void* arg);
 
 // Handlers
 void HandlerSIGALRM(int sig);
@@ -131,8 +138,6 @@ int main(int argc,char* argv[])
     pthread_setspecific(cleID, &ID);
     pthread_mutex_unlock(&mutexTID);
 
-    EVENT_GRILLE_SDL event;
- 
     srand((unsigned)time(NULL));
 
     // Ouverture de la fenetre graphique
@@ -144,13 +149,17 @@ int main(int argc,char* argv[])
 	    exit(1);
     }
 
-    pthread_t tidDefileMessage = 0, tidPiece = 0, tidEvent = 0;
+    pthread_t   tidDefileMessage = 0,
+                tidPiece = 0, 
+                tidEvent = 0, 
+                tidScore = 0;
 
     pthread_create(&tidDefileMessage, NULL, threadDefileMessage, NULL);
     setMessage("Lancement du jeu", true);
 
     pthread_create(&tidPiece, NULL, threadPiece, (void*) NULL);
     pthread_create(&tidEvent, NULL, threadEvent, (void*) NULL);
+    pthread_create(&tidScore, NULL, threadScore, NULL);
 
     TRACE("Tous les threads créés");
     
@@ -414,8 +423,15 @@ void* threadPiece(void* arg)
                     }
             
             nbCasesInserees = 0;
+
             pthread_mutex_unlock(&mutexCasesInserees);
         }
+
+        pthread_mutex_lock(&mutexScore);
+        score+=pieceEnCours.nbCases;
+        MAJScore = 1;
+        pthread_cond_signal(&condScore);
+        pthread_mutex_unlock(&mutexScore);
     }
 
     return NULL;
@@ -478,6 +494,39 @@ void* threadEvent(void* arg)
     }
 
     pthread_exit(NULL);
+}
+
+void* threadScore(void* arg)
+{
+    pthread_mutex_lock(&mutexTID);
+    int ID = nbThread;
+    nbThread++;
+    pthread_setspecific(cleID, &ID);
+    pthread_mutex_unlock(&mutexTID);
+    TRACE("threadScore lancé");
+
+    for(int i = 0; i < 4; i++)
+        DessineChiffre(1, 17-i, 0);
+    while(1)
+    {
+        pthread_mutex_lock(&mutexScore);
+        while (!MAJScore) 
+            pthread_cond_wait(&condScore, &mutexScore);
+
+        for(int i = 0; i < 4; i++)
+        {
+            char printValue = score;
+            for(int j = 0; j < i; j++)
+                printValue/=10;
+
+            DessineChiffre(1, 17-i, printValue%10);
+        }
+
+        MAJScore = 0;
+
+        pthread_mutex_unlock(&mutexScore);
+    }
+    
 }
 
 // Handlers
