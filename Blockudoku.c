@@ -66,7 +66,10 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin);
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///// Personal work ///////////////////////////////////////////////////////////////////////////////
 
-#define TRACE(message) printf("[%d::%d] : %s\n", getpid(), *((int*) pthread_getspecific(cleID)), message);
+#define TRACE(message)  pthread_mutex_lock(&mutexStdout);                                                   \
+                        printf("[%d::%d] : %s\n", getpid(), *((int*) pthread_getspecific(cleID)), message); \
+                        pthread_mutex_unlock(&mutexStdout)                                                  \
+
 // Global variables
 int nbThread = 0;
 
@@ -86,21 +89,42 @@ int nbCasesInserees;
 char MAJScore;
 int score;
 
+// Variables Analyse
+int lignesCompletes[NB_CASES] = {0, 0, 0, 0},
+    nbLignesCompletes = 0,
+    colonnesCompletes[NB_CASES] = {0, 0, 0, 0},
+    nbColonnesCompletes = 0,
+    carresComplets[NB_CASES] = {0, 0, 0, 0},
+    nbCarresComplets = 0,
+    nbAnalyses = 0;
+
+// TID
+pthread_t   tidDefileMessage,
+            tidPiece, 
+            tidEvent,
+            tidScore,
+            tidCase[9][9];
+
 // Mutex
-pthread_mutex_t mutexTID = PTHREAD_MUTEX_INITIALIZER,
+pthread_mutex_t mutexStdout = PTHREAD_MUTEX_INITIALIZER,
+                mutexTID = PTHREAD_MUTEX_INITIALIZER,
                 mutexMessage = PTHREAD_MUTEX_INITIALIZER,
                 mutexCasesInserees = PTHREAD_MUTEX_INITIALIZER,
-                mutexScore = PTHREAD_MUTEX_INITIALIZER;
+                mutexScore = PTHREAD_MUTEX_INITIALIZER,
+                mutexAnalyse = PTHREAD_MUTEX_INITIALIZER;
 
 // Conditions
 pthread_cond_t  condMessage,
                 condCasesInserees,
-                condScore;
+                condScore,
+                condAnalyse;
 
 // Cles
-pthread_key_t cleID;
+pthread_key_t   cleID,
+                cleCase;
 
 // Utilities funtions
+void setThreadID(void);
 void setMessage(const char* texte, char signalOn);
 PIECE TranslateToOrigin(PIECE piece);
 int ComparePieces(PIECE p1, PIECE p2);
@@ -111,10 +135,12 @@ void RotationPiece(PIECE* piece);
 void    *threadDefileMessage(void* arg),
         *threadPiece(void* arg),
         *threadEvent(void* arg),
-        *threadScore(void* arg);
+        *threadScore(void* arg),
+        *threadCase(void* arg);
 
 // Handlers
-void HandlerSIGALRM(int sig);
+void    HandlerSIGALRM(int sig),
+        HandlerSIGUSR1(int sig);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 int main(int argc,char* argv[])
@@ -122,7 +148,9 @@ int main(int argc,char* argv[])
     sigset_t mask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGALRM);
+    sigaddset(&mask, SIGUSR1);
     pthread_sigmask(SIG_SETMASK, &mask, NULL);
+
 
     struct sigaction setALRM;
     setALRM.sa_handler = HandlerSIGALRM;
@@ -130,13 +158,17 @@ int main(int argc,char* argv[])
     sigemptyset(&(setALRM.sa_mask));
     sigaction(SIGALRM, &setALRM, NULL);
 
-    pthread_key_create(&cleID, NULL);
+    struct sigaction setUSR1;
+    setUSR1.sa_handler = HandlerSIGUSR1;
+    setUSR1.sa_flags = 0;
+    sigemptyset(&(setUSR1.sa_mask));
+    sigaction(SIGUSR1, &setUSR1, NULL);
 
-    pthread_mutex_lock(&mutexTID);
-    int ID = nbThread;
-    nbThread++;
-    pthread_setspecific(cleID, &ID);
-    pthread_mutex_unlock(&mutexTID);
+
+    pthread_key_create(&cleID, NULL);
+    pthread_key_create(&cleCase, free);
+
+    setThreadID();
 
     srand((unsigned)time(NULL));
 
@@ -149,20 +181,23 @@ int main(int argc,char* argv[])
 	    exit(1);
     }
 
-    pthread_t   tidDefileMessage = 0,
-                tidPiece = 0, 
-                tidEvent = 0, 
-                tidScore = 0;
-
     pthread_create(&tidDefileMessage, NULL, threadDefileMessage, NULL);
     setMessage("Lancement du jeu", true);
 
-    pthread_create(&tidPiece, NULL, threadPiece, (void*) NULL);
-    pthread_create(&tidEvent, NULL, threadEvent, (void*) NULL);
+    pthread_create(&tidPiece, NULL, threadPiece, NULL);
+    pthread_create(&tidEvent, NULL, threadEvent, NULL);
     pthread_create(&tidScore, NULL, threadScore, NULL);
 
+    for(int i = 0; i < 9; i++)
+        for(int j = 0; j < 9; j++)
+        {
+            CASE* casePtr = malloc(sizeof(CASE));
+            *casePtr = (CASE) { i, j};
+            pthread_create(&tidCase[i][j], NULL, threadCase, casePtr);
+        }
+
     TRACE("Tous les threads créés");
-    
+
     pthread_join(tidEvent, NULL);
 
     // Fermeture de la fenetre
@@ -171,6 +206,7 @@ int main(int argc,char* argv[])
     printf("OK\n");
 
     pthread_key_delete(cleID);
+    pthread_key_delete(cleCase);
 
     exit(0);
 }
@@ -257,6 +293,16 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
 
 // Utilities function
 
+void setThreadID(void)
+{
+    pthread_mutex_lock(&mutexTID);
+    int* ID = malloc(sizeof(int));
+    *ID = nbThread;
+    nbThread++;
+    pthread_setspecific(cleID, ID);
+    pthread_mutex_unlock(&mutexTID);
+}
+
 void setMessage(const char* texte, char signalOn)
 {
     alarm(0);
@@ -274,10 +320,7 @@ void setMessage(const char* texte, char signalOn)
     pthread_mutex_unlock(&mutexMessage);
     
     if(signalOn)
-    {
-        alarm(0);
-        alarm(10);
-    }
+        alarm(5);
 }
 
 PIECE TranslateToOrigin(PIECE piece)
@@ -327,15 +370,12 @@ void RotationPiece(PIECE* piece)
 // Thread functions
 void* threadDefileMessage(void* arg)
 {
-    pthread_mutex_lock(&mutexTID);
-    int ID = nbThread;
-    nbThread++;
-    pthread_setspecific(cleID, &ID);
-    pthread_mutex_unlock(&mutexTID);
+    setThreadID();
     TRACE("threadDefileMessage lancé");
 
     sigset_t mask;
     sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
     pthread_sigmask(SIG_SETMASK, &mask, NULL);
 
     TRACE("Mask mit");
@@ -366,11 +406,7 @@ void* threadDefileMessage(void* arg)
 
 void* threadPiece(void* arg)
 {
-    pthread_mutex_lock(&mutexTID);
-    int ID = nbThread;
-    nbThread++;
-    pthread_setspecific(cleID, &ID);
-    pthread_mutex_unlock(&mutexTID);
+    setThreadID();
     TRACE("threadPiece lancé");
 
     while(1)
@@ -422,7 +458,7 @@ void* threadPiece(void* arg)
                             EffaceCarre(i, j);
                     }
             
-            nbCasesInserees = 0;
+            if(replaceWith == VIDE) nbCasesInserees = 0;
 
             pthread_mutex_unlock(&mutexCasesInserees);
         }
@@ -432,6 +468,11 @@ void* threadPiece(void* arg)
         MAJScore = 1;
         pthread_cond_signal(&condScore);
         pthread_mutex_unlock(&mutexScore);
+
+        for(int i = 0; i < nbCasesInserees; i++)
+            pthread_kill(tidCase[casesInserees[i].ligne][casesInserees[i].colonne], SIGUSR1);
+
+        nbCasesInserees = 0;
     }
 
     return NULL;
@@ -439,11 +480,7 @@ void* threadPiece(void* arg)
 
 void* threadEvent(void* arg)
 {
-    pthread_mutex_lock(&mutexTID);
-    int ID = nbThread;
-    nbThread++;
-    pthread_setspecific(cleID, &ID);
-    pthread_mutex_unlock(&mutexTID);
+    setThreadID();
     TRACE("threadEvent lancé");
 
     EVENT_GRILLE_SDL event;
@@ -498,11 +535,7 @@ void* threadEvent(void* arg)
 
 void* threadScore(void* arg)
 {
-    pthread_mutex_lock(&mutexTID);
-    int ID = nbThread;
-    nbThread++;
-    pthread_setspecific(cleID, &ID);
-    pthread_mutex_unlock(&mutexTID);
+    setThreadID();
     TRACE("threadScore lancé");
 
     for(int i = 0; i < 4; i++)
@@ -529,6 +562,24 @@ void* threadScore(void* arg)
     
 }
 
+void* threadCase(void* arg)
+{
+    setThreadID();
+    TRACE("threadCase lancé");
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGALRM);
+    pthread_sigmask(SIG_SETMASK, &mask, NULL);
+
+    pthread_setspecific(cleCase, (CASE*) arg);
+
+    while(1)
+    {
+        pause();
+    }
+}
+
 // Handlers
 
 void HandlerSIGALRM(int sig)
@@ -536,4 +587,103 @@ void HandlerSIGALRM(int sig)
     pthread_mutex_unlock(&mutexMessage);
 
     setMessage("Jeu en cours", false);
+}
+
+void HandlerSIGUSR1(int sig)
+{   
+    CASE* casePtr = pthread_getspecific(cleCase);
+
+    CASE carre;
+    int carreInt = 0;
+
+    char    countLigne = 0,
+            countColonne = 0,
+            countCarre = 0;
+
+    char    checkLigne = 1, 
+            checkColonne = 1, 
+            checkCarre = 1;
+
+    carre.ligne = (casePtr->ligne/3)*3;
+    carre.colonne = (casePtr->colonne/3)*3;
+    carreInt = casePtr->ligne/3 + (casePtr->colonne - (casePtr->colonne % 3));
+
+
+    pthread_mutex_lock(&mutexAnalyse);
+    
+    for(int i = 0; i < nbLignesCompletes; i++)
+        if(lignesCompletes[i] == casePtr->ligne)
+        {
+            checkLigne = 0;
+            break;
+        }
+
+    for(int i = 0; i < nbColonnesCompletes; i++)
+        if(colonnesCompletes[i] == casePtr->colonne)
+        {
+            checkColonne = 0;
+            break;
+        }
+
+    for(int i = 0; i < nbCarresComplets; i++)
+        if(carresComplets[i] == carreInt)
+        {
+            checkCarre = 0;
+            break;
+        }
+
+    
+    if(checkLigne)
+    {
+        for(countLigne = 0; countLigne < 9 && tab[casePtr->ligne][countLigne] == BRIQUE; countLigne++);
+
+        if(countLigne == 9)
+        {
+            lignesCompletes[nbLignesCompletes] = casePtr->ligne;
+            nbLignesCompletes++;
+
+            for(int i = 0; i < 9; i++)
+                DessineBrique(casePtr->ligne, i, true);
+        }
+    }    
+
+    if(checkColonne)
+    {
+        for(countColonne = 0; countColonne < 9 && tab[countColonne][casePtr->colonne] == BRIQUE; countColonne++);
+
+        if(countColonne == 9)
+        {
+            colonnesCompletes[nbColonnesCompletes] = casePtr->colonne;
+            nbColonnesCompletes++;
+
+            for(int i = 0; i < 9; i++)
+                DessineBrique(i, casePtr->colonne, true);
+        }
+
+
+    }
+
+    if(checkCarre)
+    {
+        for(int i = carre.ligne; i < carre.ligne + 3; i++)
+            for(int j = carre.colonne; j < carre.colonne + 3; j++)
+                if(tab[i][j] == BRIQUE) countCarre++;
+                
+        
+        if(countCarre == 9)
+        {
+            carresComplets[nbCarresComplets] = carreInt;
+            nbCarresComplets++;
+
+            for(int i = carre.ligne; i < carre.ligne + 3; i++)
+                for(int j = carre.colonne; j < carre.colonne + 3; j++)
+                    DessineBrique(i, j, true);
+        }
+    }
+
+
+    nbAnalyses++;
+    pthread_cond_signal(&condAnalyse);
+
+    pthread_mutex_unlock(&mutexAnalyse);
 }
