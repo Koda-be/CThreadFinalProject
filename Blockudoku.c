@@ -1,3 +1,4 @@
+#include <SDL/SDL_stdinc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -75,19 +76,21 @@ int nbThread = 0;
 
 // Variables message
 char* message; // pointeur vers le message à faire défiler
-int tailleMessage; // longueur du message
-int indiceCourant; // indice du premier caractère à afficher dans la zone graphique
+int tailleMessage = 0; // longueur du message
+int indiceCourant = 0; // indice du premier caractère à afficher dans la zone graphique
 char messageReady = 0;
 
 // Variables piece en cours
 PIECE pieceEnCours;
 
 CASE casesInserees[NB_CASES];
-int nbCasesInserees;
+int nbCasesInserees = 0;
 
 // Variables score
-char MAJScore;
-int score;
+char MAJScore = 0;
+char MAJCombo = 0;
+int score = 0;
+int combos = 0;
 
 // Variables Analyse
 int lignesCompletes[NB_CASES] = {0, 0, 0, 0},
@@ -103,7 +106,8 @@ pthread_t   tidDefileMessage,
             tidPiece, 
             tidEvent,
             tidScore,
-            tidCase[9][9];
+            tidCase[9][9],
+            tidNettoyeur;
 
 // Mutex
 pthread_mutex_t mutexStdout = PTHREAD_MUTEX_INITIALIZER,
@@ -136,7 +140,8 @@ void    *threadDefileMessage(void* arg),
         *threadPiece(void* arg),
         *threadEvent(void* arg),
         *threadScore(void* arg),
-        *threadCase(void* arg);
+        *threadCase(void* arg),
+        *threadNettoyeur(void* arg);
 
 // Handlers
 void    HandlerSIGALRM(int sig),
@@ -196,6 +201,7 @@ int main(int argc,char* argv[])
             pthread_create(&tidCase[i][j], NULL, threadCase, casePtr);
         }
 
+    pthread_create(&tidNettoyeur, NULL, threadNettoyeur, NULL);
     TRACE("Tous les threads créés");
 
     pthread_join(tidEvent, NULL);
@@ -543,19 +549,25 @@ void* threadScore(void* arg)
     while(1)
     {
         pthread_mutex_lock(&mutexScore);
-        while (!MAJScore) 
+        while (!MAJScore && !MAJCombo) 
             pthread_cond_wait(&condScore, &mutexScore);
 
         for(int i = 0; i < 4; i++)
         {
-            char printValue = score;
+            char    printScore = score,
+                    printCombo = combos;
             for(int j = 0; j < i; j++)
-                printValue/=10;
+            {
+                printScore/=10;
+                printCombo/=10;
+            }
 
-            DessineChiffre(1, 17-i, printValue%10);
+            DessineChiffre(1, 17-i, printScore%10);
+            DessineChiffre(8, 17-i, printCombo%10);
         }
 
         MAJScore = 0;
+        MAJCombo = 0;
 
         pthread_mutex_unlock(&mutexScore);
     }
@@ -577,6 +589,92 @@ void* threadCase(void* arg)
     while(1)
     {
         pause();
+    }
+}
+
+void* threadNettoyeur(void* arg)
+{
+    setThreadID();
+    TRACE("threadNettoyeur lancé");
+
+    while(1)
+    {
+        TRACE("Mise en attente");
+        printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
+
+        pthread_mutex_lock(&mutexAnalyse);
+
+        int nbcases = pieceEnCours.nbCases;
+        while(nbAnalyses < nbcases)
+        {
+            TRACE("pieceEnCours.nbCases vs nbcases: ");
+            printf("%d, %d\n", pieceEnCours.nbCases, nbcases);
+            pthread_cond_wait(&condAnalyse, &mutexAnalyse);
+        }
+            
+        pthread_mutex_unlock(&mutexAnalyse);
+
+        TRACE("Condition recue");
+
+        int addCombo = nbLignesCompletes + nbColonnesCompletes + nbCarresComplets;
+
+        TRACE("");
+        printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
+
+        pthread_mutex_lock(&mutexScore);
+
+        if((MAJCombo = addCombo))
+        {
+            nanosleep(&((struct timespec) {2, 0 }), NULL);
+
+            for(int i = 0; i < nbLignesCompletes; i++)
+                for(int j = 0; j < 9; j++)
+                {
+                    tab[lignesCompletes[i]][j] = VIDE;
+                    EffaceCarre(lignesCompletes[i], j);
+                }
+
+            nbLignesCompletes = 0;
+
+            for(int i = 0; i < 9; i++)
+                for(int j = 0; j < nbColonnesCompletes; j++)
+                {
+                    tab[i][colonnesCompletes[j]] = VIDE;
+                    EffaceCarre(i, colonnesCompletes[j]);
+                }
+
+            nbColonnesCompletes = 0;
+
+            for(int i = 0; i < nbCarresComplets; i++)
+            {
+                CASE carre = {(carresComplets[i]%3)*3, (carresComplets[i]/3)*3};
+
+                for(int i = carre.ligne; i < carre.ligne+3; i++)
+                    for(int j = carre.colonne; j < carre.colonne+3; j++)
+                    {
+                        tab[i][j] = VIDE;
+                        EffaceCarre(i,j);
+                    }
+            }
+
+            nbCarresComplets = 0;
+        }
+
+        nbAnalyses = 0;
+
+        combos += addCombo;
+
+        switch(addCombo)
+        {
+            case 0: break;
+            case 1: score += 10; setMessage("Simple combo", false); break;
+            case 2: score += 25; setMessage("Double combo", false); break;
+            case 3: score += 40; setMessage("Triple combo", false); break;
+            default: score += 55; setMessage("Quadruple combo", false); break;
+        }
+
+        pthread_mutex_unlock(&mutexScore);
+        pthread_cond_signal(&condScore);
     }
 }
 
@@ -610,6 +708,9 @@ void HandlerSIGUSR1(int sig)
 
 
     pthread_mutex_lock(&mutexAnalyse);
+
+    TRACE("entering handlerSIGUSR1");
+    printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
     
     for(int i = 0; i < nbLignesCompletes; i++)
         if(lignesCompletes[i] == casePtr->ligne)
@@ -635,12 +736,15 @@ void HandlerSIGUSR1(int sig)
     
     if(checkLigne)
     {
+        
         for(countLigne = 0; countLigne < 9 && tab[casePtr->ligne][countLigne] == BRIQUE; countLigne++);
 
         if(countLigne == 9)
         {
             lignesCompletes[nbLignesCompletes] = casePtr->ligne;
             nbLignesCompletes++;
+            TRACE("");
+            printf("nbLignesCompletes: %d\n",nbLignesCompletes);
 
             for(int i = 0; i < 9; i++)
                 DessineBrique(casePtr->ligne, i, true);
@@ -656,11 +760,12 @@ void HandlerSIGUSR1(int sig)
             colonnesCompletes[nbColonnesCompletes] = casePtr->colonne;
             nbColonnesCompletes++;
 
+            TRACE("");
+            printf("nbColonnesCompletes: %d\n",nbColonnesCompletes);
+
             for(int i = 0; i < 9; i++)
                 DessineBrique(i, casePtr->colonne, true);
         }
-
-
     }
 
     if(checkCarre)
@@ -675,13 +780,17 @@ void HandlerSIGUSR1(int sig)
             carresComplets[nbCarresComplets] = carreInt;
             nbCarresComplets++;
 
+            TRACE("");
+            printf("nbCarresComplets: %d\n",nbCarresComplets);
+
             for(int i = carre.ligne; i < carre.ligne + 3; i++)
                 for(int j = carre.colonne; j < carre.colonne + 3; j++)
                     DessineBrique(i, j, true);
         }
     }
 
-
+    TRACE("Exiting handlerSIGUSR1");
+    printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
     nbAnalyses++;
     pthread_cond_signal(&condAnalyse);
 
