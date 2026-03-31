@@ -101,6 +101,10 @@ int lignesCompletes[NB_CASES] = {0, 0, 0, 0},
     nbCarresComplets = 0,
     nbAnalyses = 0;
 
+int couleurActuelle;
+
+char traitementEnCours = 0;
+
 // TID
 pthread_t   tidDefileMessage,
             tidPiece, 
@@ -115,13 +119,16 @@ pthread_mutex_t mutexStdout = PTHREAD_MUTEX_INITIALIZER,
                 mutexMessage = PTHREAD_MUTEX_INITIALIZER,
                 mutexCasesInserees = PTHREAD_MUTEX_INITIALIZER,
                 mutexScore = PTHREAD_MUTEX_INITIALIZER,
-                mutexAnalyse = PTHREAD_MUTEX_INITIALIZER;
+                mutexAnalyse = PTHREAD_MUTEX_INITIALIZER,
+                mutexTraitement = PTHREAD_MUTEX_INITIALIZER,
+                mutexLed = PTHREAD_MUTEX_INITIALIZER;
 
 // Conditions
-pthread_cond_t  condMessage,
-                condCasesInserees,
-                condScore,
-                condAnalyse;
+pthread_cond_t  condMessage = PTHREAD_COND_INITIALIZER,
+                condCasesInserees = PTHREAD_COND_INITIALIZER,
+                condScore = PTHREAD_COND_INITIALIZER,
+                condAnalyse = PTHREAD_COND_INITIALIZER,
+                condTraitement = PTHREAD_COND_INITIALIZER;
 
 // Cles
 pthread_key_t   cleID,
@@ -185,6 +192,9 @@ int main(int argc,char* argv[])
 	    printf("Erreur de OuvrirGrilleSDL\n");
 	    exit(1);
     }
+
+    DessineVoyant(8, 10, VERT);
+    couleurActuelle = VERT;
 
     pthread_create(&tidDefileMessage, NULL, threadDefileMessage, NULL);
     setMessage("Lancement du jeu", true);
@@ -384,14 +394,10 @@ void* threadDefileMessage(void* arg)
     sigaddset(&mask, SIGUSR1);
     pthread_sigmask(SIG_SETMASK, &mask, NULL);
 
-    TRACE("Mask mit");
-
     pthread_mutex_lock(&mutexMessage);
     while(message==NULL)
         pthread_cond_wait(&condMessage, &mutexMessage);
     pthread_mutex_unlock(&mutexMessage);
-
-    TRACE("message non nul");
 
     for(int i = 1; i<=17; i++) DessineLettre(10, i, 0);
 
@@ -469,6 +475,16 @@ void* threadPiece(void* arg)
             pthread_mutex_unlock(&mutexCasesInserees);
         }
 
+        pthread_mutex_lock(&mutexTraitement);
+        traitementEnCours = true;
+        pthread_mutex_unlock(&mutexTraitement);
+
+
+        pthread_mutex_lock(&mutexLed);
+        couleurActuelle = BLEU;
+        DessineVoyant(8, 10,couleurActuelle);
+        pthread_mutex_unlock(&mutexLed);
+
         pthread_mutex_lock(&mutexScore);
         score+=pieceEnCours.nbCases;
         MAJScore = 1;
@@ -479,6 +495,11 @@ void* threadPiece(void* arg)
             pthread_kill(tidCase[casesInserees[i].ligne][casesInserees[i].colonne], SIGUSR1);
 
         nbCasesInserees = 0;
+
+        pthread_mutex_lock(&mutexTraitement);
+        while(traitementEnCours)
+            pthread_cond_wait(&condTraitement, &mutexTraitement);
+        pthread_mutex_unlock(&mutexTraitement);
     }
 
     return NULL;
@@ -503,7 +524,7 @@ void* threadEvent(void* arg)
                 break;
 
             case CLIC_GAUCHE:
-                if((event.ligne < 9 && event.colonne < 9) && (tab[event.ligne][event.colonne] == VIDE))
+                if((event.ligne < 9 && event.colonne < 9) && (tab[event.ligne][event.colonne] == VIDE) && !traitementEnCours)
                 {
                     tab[event.ligne][event.colonne] = DIAMANT;
                     DessineDiamant(event.ligne, event.colonne, pieceEnCours.couleur);
@@ -513,6 +534,15 @@ void* threadEvent(void* arg)
                     nbCasesInserees++;
                     pthread_cond_signal(&condCasesInserees);
                     pthread_mutex_unlock(&mutexCasesInserees);
+                }
+
+                else 
+                {
+                    pthread_mutex_lock(&mutexLed);
+                    DessineVoyant(8,10,ROUGE);
+                    nanosleep(&((struct timespec) {0, 400000000}), NULL);
+                    DessineVoyant(8,10,couleurActuelle);
+                    pthread_mutex_unlock(&mutexLed);
                 }
 
                 break;
@@ -554,7 +584,7 @@ void* threadScore(void* arg)
 
         for(int i = 0; i < 4; i++)
         {
-            char    printScore = score,
+            int     printScore = score,
                     printCombo = combos;
             for(int j = 0; j < i; j++)
             {
@@ -599,27 +629,14 @@ void* threadNettoyeur(void* arg)
 
     while(1)
     {
-        TRACE("Mise en attente");
-        printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
-
         pthread_mutex_lock(&mutexAnalyse);
 
-        int nbcases = pieceEnCours.nbCases;
-        while(nbAnalyses < nbcases)
-        {
-            TRACE("pieceEnCours.nbCases vs nbcases: ");
-            printf("%d, %d\n", pieceEnCours.nbCases, nbcases);
+        while(nbAnalyses < pieceEnCours.nbCases)
             pthread_cond_wait(&condAnalyse, &mutexAnalyse);
-        }
             
         pthread_mutex_unlock(&mutexAnalyse);
 
-        TRACE("Condition recue");
-
         int addCombo = nbLignesCompletes + nbColonnesCompletes + nbCarresComplets;
-
-        TRACE("");
-        printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
 
         pthread_mutex_lock(&mutexScore);
 
@@ -675,6 +692,18 @@ void* threadNettoyeur(void* arg)
 
         pthread_mutex_unlock(&mutexScore);
         pthread_cond_signal(&condScore);
+
+        pthread_mutex_lock(&mutexLed);
+        couleurActuelle = VERT;
+        DessineVoyant(8,10,VERT);
+        pthread_mutex_unlock(&mutexLed);
+
+        pthread_mutex_lock(&mutexTraitement);
+        traitementEnCours = false;
+        pthread_cond_signal(&condTraitement);
+        pthread_mutex_unlock(&mutexTraitement);
+
+
     }
 }
 
@@ -708,9 +737,6 @@ void HandlerSIGUSR1(int sig)
 
 
     pthread_mutex_lock(&mutexAnalyse);
-
-    TRACE("entering handlerSIGUSR1");
-    printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
     
     for(int i = 0; i < nbLignesCompletes; i++)
         if(lignesCompletes[i] == casePtr->ligne)
@@ -733,7 +759,6 @@ void HandlerSIGUSR1(int sig)
             break;
         }
 
-    
     if(checkLigne)
     {
         
@@ -743,8 +768,6 @@ void HandlerSIGUSR1(int sig)
         {
             lignesCompletes[nbLignesCompletes] = casePtr->ligne;
             nbLignesCompletes++;
-            TRACE("");
-            printf("nbLignesCompletes: %d\n",nbLignesCompletes);
 
             for(int i = 0; i < 9; i++)
                 DessineBrique(casePtr->ligne, i, true);
@@ -759,9 +782,6 @@ void HandlerSIGUSR1(int sig)
         {
             colonnesCompletes[nbColonnesCompletes] = casePtr->colonne;
             nbColonnesCompletes++;
-
-            TRACE("");
-            printf("nbColonnesCompletes: %d\n",nbColonnesCompletes);
 
             for(int i = 0; i < 9; i++)
                 DessineBrique(i, casePtr->colonne, true);
@@ -780,17 +800,12 @@ void HandlerSIGUSR1(int sig)
             carresComplets[nbCarresComplets] = carreInt;
             nbCarresComplets++;
 
-            TRACE("");
-            printf("nbCarresComplets: %d\n",nbCarresComplets);
-
             for(int i = carre.ligne; i < carre.ligne + 3; i++)
                 for(int j = carre.colonne; j < carre.colonne + 3; j++)
                     DessineBrique(i, j, true);
         }
     }
 
-    TRACE("Exiting handlerSIGUSR1");
-    printf("nbLignesCompletes: %d\nnbColonnesCompletes: %d\nbCarresComplets: %d\n", nbLignesCompletes, nbColonnesCompletes, nbCarresComplets);
     nbAnalyses++;
     pthread_cond_signal(&condAnalyse);
 
