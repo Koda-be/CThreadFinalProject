@@ -5,7 +5,7 @@ RESSOURCES=Ressources
 
 CC = gcc -I$(GRILLESDL) -I$(RESSOURCES)
 OBJS = $(GRILLESDL)/GrilleSDL.o $(RESSOURCES)/Ressources.o
-PROGRAMS = Blockudoku
+PROGRAMS = Blockudoku DEBUG
 
 ALL: $(PROGRAMS)
 
