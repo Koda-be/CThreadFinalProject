@@ -248,7 +248,6 @@ int main(int argc,char* argv[])
         for(int j = 0; j < 9; j++)
         {
 #ifdef DEBUG
-            nanosleep(&((struct timespec){0, 500000000}), NULL);
             TRACE("pthread_cancel de la case %d %d", i, j);
 #endif
             pthread_cancel(tidCase[i][j]);
