@@ -67,8 +67,6 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin);
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///// Personal work ///////////////////////////////////////////////////////////////////////////////
 
-// Traces
-
 char* printFormat = NULL;
 pthread_mutex_t mutexStdout = PTHREAD_MUTEX_INITIALIZER;
 
@@ -80,28 +78,27 @@ pthread_mutex_t mutexStdout = PTHREAD_MUTEX_INITIALIZER;
                             free(printFormat);                                                                      \
                             pthread_mutex_unlock(&mutexStdout)                                                      \
 
-// Global variables
+
 int nbThread = 0;
 
-// Variables message
-char* message; // pointeur vers le message à faire défiler
-int tailleMessage = 0; // longueur du message
-int indiceCourant = 0; // indice du premier caractère à afficher dans la zone graphique
+char* message;
+int tailleMessage = 0;
+int indiceCourant = 0;
 char messageReady = 0;
 
-// Variables piece en cours
+
 PIECE pieceEnCours;
 
 CASE casesInserees[NB_CASES];
 int nbCasesInserees = 0;
 
-// Variables score
+
 char MAJScore = 0;
 char MAJCombo = 0;
 int score = 0;
 int combos = 0;
 
-// Variables Analyse
+
 int lignesCompletes[NB_CASES] = {0, 0, 0, 0},
     nbLignesCompletes = 0,
     colonnesCompletes[NB_CASES] = {0, 0, 0, 0},
@@ -114,7 +111,7 @@ int couleurActuelle;
 
 char traitementEnCours = 0;
 
-// TID
+
 pthread_t   tidDefileMessage,
             tidPiece, 
             tidEvent,
@@ -122,7 +119,7 @@ pthread_t   tidDefileMessage,
             tidCase[9][9],
             tidNettoyeur;
 
-// Mutex
+
 pthread_mutex_t mutexTID = PTHREAD_MUTEX_INITIALIZER,
                 mutexMessage = PTHREAD_MUTEX_INITIALIZER,
                 mutexCasesInserees = PTHREAD_MUTEX_INITIALIZER,
@@ -131,33 +128,33 @@ pthread_mutex_t mutexTID = PTHREAD_MUTEX_INITIALIZER,
                 mutexTraitement = PTHREAD_MUTEX_INITIALIZER,
                 mutexLed = PTHREAD_MUTEX_INITIALIZER;
 
-// Conditions
+
 pthread_cond_t  condMessage = PTHREAD_COND_INITIALIZER,
                 condCasesInserees = PTHREAD_COND_INITIALIZER,
                 condScore = PTHREAD_COND_INITIALIZER,
                 condAnalyse = PTHREAD_COND_INITIALIZER,
                 condTraitement = PTHREAD_COND_INITIALIZER;
 
-// Cles
+
 pthread_key_t   cleID,
                 cleCase;
 
-// once_t
+
 pthread_once_t  onceID = PTHREAD_ONCE_INIT,
                 onceCase = PTHREAD_ONCE_INIT;
 
-// Utilities funtions
+
 void setThreadID(void);
 void setMessage(const char* texte, char signalOn);
 PIECE TranslateToOrigin(PIECE piece);
 int ComparePieces(PIECE p1, PIECE p2);
 void RotationPiece(PIECE* piece);
 
-// Init functions
+
 void    InitCleID(void),
         InitCleCase(void);
 
-// Thread functions
+
 void    *threadDefileMessage(void* arg),
         *threadPiece(void* arg),
         *threadEvent(void* arg),
@@ -165,7 +162,7 @@ void    *threadDefileMessage(void* arg),
         *threadCase(void* arg),
         *threadNettoyeur(void* arg);
 
-// Handlers
+
 void    HandlerSIGALRM(int sig),
         HandlerSIGUSR1(int sig);
 
@@ -362,8 +359,6 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///// Personal functions //////////////////////////////////////////////////////////////////////////
 
-// Utilities function
-
 void setThreadID(void)
 {
     pthread_once(&onceID, InitCleID);
@@ -385,7 +380,6 @@ void setMessage(const char* texte, char signalOn)
 
     pthread_mutex_lock(&mutexMessage);
 
-    // printf("%p", message);
     tailleMessage=strlen(texte);
     message = (char*) realloc(message , tailleMessage+1);
     strcpy(message, texte);
@@ -447,7 +441,7 @@ void RotationPiece(PIECE* piece)
     TriCases(piece->cases, 0, piece->nbCases-1);
 }
 
-// Init functions
+
 
 void InitCleID(void)
 {
@@ -457,11 +451,11 @@ void InitCleID(void)
 #ifdef DEBUG
 void DestroyKey(void* arg)
 {
-    printf("Entering DestroyKey\n");                                            ////////////////////////////////////////////////////
-    CASE* casePtr = (CASE*) arg;                                                /// LA FONCTION DE DESTRUCTION EST APPELÉE APRES ///
-    printf("Destroying specific of %d %d\n", casePtr->ligne, casePtr->colonne); /// LA DESTRUCTION DU THREAD TU M'ETONNES QUE LA ///  <----- Désolé je me suis un peu énervé
-    free(casePtr);                                                              /////////////// TRACE FONCTIONNE PAS ///////////////
-}                                                                               ////////////////////////////////////////////////////
+    printf("Entering DestroyKey\n");                                            
+    CASE* casePtr = (CASE*) arg;                                                
+    printf("Destroying specific of %d %d\n", casePtr->ligne, casePtr->colonne); 
+    free(casePtr);                                                              
+}                                                                               
 #endif
 
 void InitCleCase(void)
@@ -474,7 +468,7 @@ void InitCleCase(void)
     pthread_key_create(&cleCase, destroyFunc);
 }
 
-// Thread functions
+
 
 #ifdef DEBUG
 void cleanupRoutine(void* ptr)
@@ -859,7 +853,7 @@ void* threadNettoyeur(void* arg)
     }
 }
 
-// Handlers
+
 
 void HandlerSIGALRM(int sig)
 {
