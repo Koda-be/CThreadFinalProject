@@ -67,9 +67,18 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin);
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///// Personal work ///////////////////////////////////////////////////////////////////////////////
 
-#define TRACE(message)  pthread_mutex_lock(&mutexStdout);                                                   \
-                        printf("[%d::%d] : %s\n", getpid(), *((int*) pthread_getspecific(cleID)), message); \
-                        pthread_mutex_unlock(&mutexStdout)                                                  \
+// Traces
+
+char* printFormat = NULL;
+pthread_mutex_t mutexStdout = PTHREAD_MUTEX_INITIALIZER;
+
+#define TRACE(format,...)   pthread_mutex_lock(&mutexStdout);                                                       \
+                            printFormat = malloc(strlen(format)+1);                                                 \
+                            strcpy(printFormat, format);                                                            \
+                            sprintf(printFormat, printFormat __VA_OPT__(,) __VA_ARGS__);                            \
+                            printf("[%d::%d] : %s\n", getpid(), *((int*) pthread_getspecific(cleID)), printFormat); \
+                            free(printFormat);                                                                      \
+                            pthread_mutex_unlock(&mutexStdout)                                                      \
 
 // Global variables
 int nbThread = 0;
@@ -114,8 +123,7 @@ pthread_t   tidDefileMessage,
             tidNettoyeur;
 
 // Mutex
-pthread_mutex_t mutexStdout = PTHREAD_MUTEX_INITIALIZER,
-                mutexTID = PTHREAD_MUTEX_INITIALIZER,
+pthread_mutex_t mutexTID = PTHREAD_MUTEX_INITIALIZER,
                 mutexMessage = PTHREAD_MUTEX_INITIALIZER,
                 mutexCasesInserees = PTHREAD_MUTEX_INITIALIZER,
                 mutexScore = PTHREAD_MUTEX_INITIALIZER,
@@ -134,6 +142,10 @@ pthread_cond_t  condMessage = PTHREAD_COND_INITIALIZER,
 pthread_key_t   cleID,
                 cleCase;
 
+// once_t
+pthread_once_t  onceID = PTHREAD_ONCE_INIT,
+                onceCase = PTHREAD_ONCE_INIT;
+
 // Utilities funtions
 void setThreadID(void);
 void setMessage(const char* texte, char signalOn);
@@ -141,6 +153,9 @@ PIECE TranslateToOrigin(PIECE piece);
 int ComparePieces(PIECE p1, PIECE p2);
 void RotationPiece(PIECE* piece);
 
+// Init functions
+void    InitCleID(void),
+        InitCleCase(void);
 
 // Thread functions
 void    *threadDefileMessage(void* arg),
@@ -155,6 +170,8 @@ void    HandlerSIGALRM(int sig),
         HandlerSIGUSR1(int sig);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 int main(int argc,char* argv[])
 {
     sigset_t mask;
@@ -175,10 +192,6 @@ int main(int argc,char* argv[])
     setUSR1.sa_flags = 0;
     sigemptyset(&(setUSR1.sa_mask));
     sigaction(SIGUSR1, &setUSR1, NULL);
-
-
-    pthread_key_create(&cleID, NULL);
-    pthread_key_create(&cleCase, free);
 
     setThreadID();
 
@@ -212,14 +225,56 @@ int main(int argc,char* argv[])
         }
 
     pthread_create(&tidNettoyeur, NULL, threadNettoyeur, NULL);
-    TRACE("Tous les threads créés");
+    TRACE("Tous les threads créés, attente de join le threadPiece");
 
-    pthread_join(tidEvent, NULL);
+    pthread_join(tidPiece, NULL);
+#ifdef DEBUG
+    TRACE("ThreadPiece joined");
+#endif
 
+    setMessage("Fin de partie", false);
+#ifdef DEBUG
+    TRACE("Message sent");
+#endif
+
+    DessineVoyant(8,10,ROUGE);
+
+    pthread_cancel(tidEvent);
+
+#ifdef DEBUG
+        TRACE("threadEvent cancelled");
+        nanosleep(&((struct timespec){0, 500000000}), NULL);
+        TRACE("deleting threadCases");
+#endif
+
+    for(int i = 0; i < 9; i++)
+        for(int j = 0; j < 9; j++)
+        {
+#ifdef DEBUG
+            nanosleep(&((struct timespec){0, 500000000}), NULL);
+            TRACE("pthread_cancel de la case %d %d", i, j);
+#endif
+            pthread_cancel(tidCase[i][j]);
+        }
+
+    char croixClickee = 0;
+    
+    while(!croixClickee)
+    {
+        EVENT_GRILLE_SDL event = ReadEvent();
+
+        if(event.type == CROIX) croixClickee = 1;
+    }
+
+    pthread_cancel(tidDefileMessage);
+
+#ifdef DEBUG
+    TRACE("threadDefileMessage cancelled");
+#endif
     // Fermeture de la fenetre
     TRACE("Fermeture de la fenetre graphique...");
     FermetureFenetreGraphique();
-    printf("OK\n");
+    TRACE("OK");
 
     pthread_key_delete(cleID);
     pthread_key_delete(cleCase);
@@ -311,6 +366,8 @@ void TriCases(CASE *vecteur,int indiceDebut,int indiceFin)
 
 void setThreadID(void)
 {
+    pthread_once(&onceID, InitCleID);
+
     pthread_mutex_lock(&mutexTID);
     int* ID = malloc(sizeof(int));
     *ID = nbThread;
@@ -322,6 +379,9 @@ void setThreadID(void)
 void setMessage(const char* texte, char signalOn)
 {
     alarm(0);
+#ifdef DEBUG
+    TRACE("In setMessage");
+#endif
 
     pthread_mutex_lock(&mutexMessage);
 
@@ -337,6 +397,10 @@ void setMessage(const char* texte, char signalOn)
     
     if(signalOn)
         alarm(5);
+
+#ifdef DEBUG
+    TRACE("exiting setMessage");
+#endif
 }
 
 PIECE TranslateToOrigin(PIECE piece)
@@ -383,11 +447,53 @@ void RotationPiece(PIECE* piece)
     TriCases(piece->cases, 0, piece->nbCases-1);
 }
 
+// Init functions
+
+void InitCleID(void)
+{
+    pthread_key_create(&cleID,free);
+}
+
+#ifdef DEBUG
+void DestroyKey(void* arg)
+{
+    printf("Entering DestroyKey\n");                                            ////////////////////////////////////////////////////
+    CASE* casePtr = (CASE*) arg;                                                /// LA FONCTION DE DESTRUCTION EST APPELÉE APRES ///
+    printf("Destroying specific of %d %d\n", casePtr->ligne, casePtr->colonne); /// LA DESTRUCTION DU THREAD TU M'ETONNES QUE LA ///  <----- Désolé je me suis un peu énervé
+    free(casePtr);                                                              /////////////// TRACE FONCTIONNE PAS ///////////////
+}                                                                               ////////////////////////////////////////////////////
+#endif
+
+void InitCleCase(void)
+{
+#ifdef DEBUG
+#define destroyFunc DestroyKey
+#else
+#define destroyFunc free
+#endif
+    pthread_key_create(&cleCase, destroyFunc);
+}
+
 // Thread functions
+
+#ifdef DEBUG
+void cleanupRoutine(void* ptr)
+{
+    TRACE("entered cleanup routine");
+    free(ptr);
+    TRACE("sortie de cleanup routine");
+}
+#define cleanuproutine cleanupRoutine
+#else
+#define cleanuproutine free
+#endif
+
 void* threadDefileMessage(void* arg)
 {
     setThreadID();
     TRACE("threadDefileMessage lancé");
+
+    pthread_cleanup_push(cleanuproutine, message);
 
     sigset_t mask;
     sigemptyset(&mask);
@@ -413,6 +519,8 @@ void* threadDefileMessage(void* arg)
         nanosleep(&spec, NULL);
     }
 
+    pthread_cleanup_pop(1);
+
     pthread_exit(NULL);
 }
 
@@ -420,6 +528,8 @@ void* threadPiece(void* arg)
 {
     setThreadID();
     TRACE("threadPiece lancé");
+
+    char piecePlaceable = 1;
 
     while(1)
     {
@@ -438,6 +548,30 @@ void* threadPiece(void* arg)
             RotationPiece(&pieceEnCours);
 
         DessinePiece(pieceEnCours);
+
+        pthread_mutex_lock(&mutexTraitement);
+
+        piecePlaceable = 0;
+
+        for(int i = 0; i < 9 && !piecePlaceable; i++)
+        {
+            for(int j = 0; j < 9 && !piecePlaceable; j++)
+            {
+                char nbEmplacement = 0;
+                for(int k = 0; k < pieceEnCours.nbCases; k++)
+                {
+                    CASE caseCheckee = {i+pieceEnCours.cases[k].ligne, j+pieceEnCours.cases[k].colonne};
+                    if(caseCheckee.ligne < 9 && caseCheckee.colonne < 9 && tab[caseCheckee.ligne][caseCheckee.colonne] == VIDE) nbEmplacement++;
+                    else break;
+                }
+                if(nbEmplacement == pieceEnCours.nbCases)
+                    piecePlaceable = 1;
+            }
+        }
+
+        if(!piecePlaceable) break;
+
+        pthread_mutex_unlock(&mutexTraitement);
 
         char replaceWith = VIDE;
 
@@ -502,26 +636,40 @@ void* threadPiece(void* arg)
         pthread_mutex_unlock(&mutexTraitement);
     }
 
-    return NULL;
+#ifdef DEBUG
+    TRACE("Sortie du threadPiece");
+#endif
+    pthread_exit(NULL);
 }
+
+#ifdef DEBUG
+void cleanupEvent(void* arg)
+{
+    TRACE("cleanupEvent");
+}
+#endif
 
 void* threadEvent(void* arg)
 {
     setThreadID();
     TRACE("threadEvent lancé");
 
-    EVENT_GRILLE_SDL event;
-    char croixClickee = 0;
+    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
-    while(!croixClickee)
+#ifdef DEBUG
+    pthread_cleanup_push(cleanupEvent, NULL);
+#endif
+
+    EVENT_GRILLE_SDL event;
+
+    while(1)
     {
         event = ReadEvent();
 
         switch(event.type)
         {
             case CROIX:
-                croixClickee = 1;
-                break;
+                exit(0);
 
             case CLIC_GAUCHE:
                 if((event.ligne < 9 && event.colonne < 9) && (tab[event.ligne][event.colonne] == VIDE) && !traitementEnCours)
@@ -566,6 +714,9 @@ void* threadEvent(void* arg)
         }
     }
 
+#ifdef DEBUG
+    pthread_cleanup_pop(1);
+#endif
     pthread_exit(NULL);
 }
 
@@ -607,6 +758,9 @@ void* threadScore(void* arg)
 void* threadCase(void* arg)
 {
     setThreadID();
+
+    pthread_once(&onceCase, InitCleCase);
+
     TRACE("threadCase lancé");
 
     sigset_t mask;
@@ -702,8 +856,6 @@ void* threadNettoyeur(void* arg)
         traitementEnCours = false;
         pthread_cond_signal(&condTraitement);
         pthread_mutex_unlock(&mutexTraitement);
-
-
     }
 }
 
