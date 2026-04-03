@@ -14,7 +14,7 @@ Blockudoku:	Blockudoku.c $(OBJS)
 	$(CC) Blockudoku.c -o Blockudoku $(OBJS) -lrt -lpthread -lSDL
 
 DEBUG:	Blockudoku.c $(OBJS)
-	echo Creation de Blockudoku...
+	echo Creation de Blockudoku_debug...
 	$(CC) Blockudoku.c -o Blockudoku_debug $(OBJS) -lrt -lpthread -lSDL -D DEBUG
 
 $(GRILLESDL)/GrilleSDL.o:	$(GRILLESDL)/GrilleSDL.c $(GRILLESDL)/GrilleSDL.h
