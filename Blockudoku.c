@@ -389,7 +389,7 @@ void setMessage(const char* texte, char signalOn)
     pthread_mutex_unlock(&mutexMessage);
     
     if(signalOn)
-        alarm(5);
+        alarm(10);
 
 #ifdef DEBUG
     TRACE("exiting setMessage");
