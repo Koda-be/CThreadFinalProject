@@ -856,8 +856,6 @@ void* threadNettoyeur(void* arg)
 
 void HandlerSIGALRM(int sig)
 {
-    pthread_mutex_unlock(&mutexMessage);
-
     setMessage("Jeu en cours", false);
 }
 
